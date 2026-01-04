@@ -13,40 +13,28 @@ import java.util.function.Function;
 import javax.imageio.ImageIO;
 
 public class PlaceClipboardCollage {
-  private static class GridImage {
-    Image image;
-    int x, y;
-    int w, h;
-
-    private GridImage(Image i, int x, int y, int w, int h) {
-      image = i;
-      this.x = x;
-      this.y = y;
-      this.w = w;
-      this.h = h;
-    }
-
+  private record GridImage(Image image, int x, int y, int w, int h) {
     private int getAbsX() {
-      double w2 = (w - image.getWidth(null) / (double) wid) / 2.0 * wid;
-      return x * wid + (int) w2;
+      double w2 = (w - image.getWidth(null) / (double) spacing_d) / 2.0 * spacing_d;
+      return x * spacing_d + (int) w2;
     }
 
     private int getAbsY() {
-      double h2 = (h - image.getHeight(null) / (double) wid) / 2.0 * wid;
-      return y * wid + (int) h2;
+      double h2 = (h - image.getHeight(null) / (double) spacing_d) / 2.0 * spacing_d;
+      return y * spacing_d + (int) h2;
     }
   }
 
-  private static final int wid = 50;
+  private static final int spacing_d = 50;
   private static ArrayList<GridImage> bestGridImages = null;
 
   @Deprecated
   private static final Comparator<Image> comparator0 =
       (o1, o2) -> {
-        int w1 = (int) Math.ceil(o1.getWidth(null) / (double) wid);
-        int w2 = (int) Math.ceil(o2.getWidth(null) / (double) wid);
-        int h1 = (int) Math.ceil(o1.getHeight(null) / (double) wid);
-        int h2 = (int) Math.ceil(o2.getHeight(null) / (double) wid);
+        int w1 = (int) Math.ceil(o1.getWidth(null) / (double) spacing_d);
+        int w2 = (int) Math.ceil(o2.getWidth(null) / (double) spacing_d);
+        int h1 = (int) Math.ceil(o1.getHeight(null) / (double) spacing_d);
+        int h2 = (int) Math.ceil(o2.getHeight(null) / (double) spacing_d);
         return w1 * h1 - w2 * h2;
       };
 
@@ -75,12 +63,12 @@ public class PlaceClipboardCollage {
         return Math.max(wmax1, hmax1) - Math.max(wmax2, hmax2);
       };
   private static final Function<ArrayList<GridImage>, Integer> getMaxW =
-      (l) -> l.stream().mapToInt(e -> e.x * wid + e.w * wid).max().orElseThrow();
+      (l) -> l.stream().mapToInt(e -> e.x * spacing_d + e.w * spacing_d).max().orElseThrow();
   private static final Function<ArrayList<GridImage>, Integer> getMaxH =
-      (l) -> l.stream().mapToInt(e -> e.y * wid + e.h * wid).max().orElseThrow();
+      (l) -> l.stream().mapToInt(e -> e.y * spacing_d + e.h * spacing_d).max().orElseThrow();
   private static long steps = 0;
 
-  public static void main(String[] args) throws Exception {
+  public static void main(String[] args) throws IOException, InterruptedException {
     ArrayList<Image> images = new ArrayList<>();
     System.out.println(
         "The app is running. Copy images to clipboard to add them to the collage. Press Ctrl+C to stop.");
@@ -98,13 +86,17 @@ public class PlaceClipboardCollage {
     }
   }
 
-  private static Image getImageFromClipboard() throws Exception {
-    Transferable transferable = Toolkit.getDefaultToolkit().getSystemClipboard().getContents(null);
-    if (transferable != null && transferable.isDataFlavorSupported(DataFlavor.imageFlavor)) {
-      return (Image) transferable.getTransferData(DataFlavor.imageFlavor);
-    } else {
-      return null;
+  private static Image getImageFromClipboard() {
+    try {
+      Transferable transferable =
+          Toolkit.getDefaultToolkit().getSystemClipboard().getContents(null);
+      if (transferable != null && transferable.isDataFlavorSupported(DataFlavor.imageFlavor)) {
+        return (Image) transferable.getTransferData(DataFlavor.imageFlavor);
+      }
+    } catch (Exception e) {
+      System.out.println("Error getting image from clipboard: " + e.getMessage());
     }
+    return null;
   }
 
   private static boolean setGrid(boolean[][] grid, int x, int y, int w, int h, boolean val) {
@@ -139,8 +131,8 @@ public class PlaceClipboardCollage {
       return;
     }
     Image image = images.get(i);
-    int w = (int) Math.ceil(image.getWidth(null) / (double) wid);
-    int h = (int) Math.ceil(image.getHeight(null) / (double) wid);
+    int w = (int) Math.ceil(image.getWidth(null) / (double) spacing_d);
+    int h = (int) Math.ceil(image.getHeight(null) / (double) spacing_d);
     for (int x = 0; x < grid.length; x++) {
       for (int y = 0; y < grid.length; y++) {
         if (setGrid(grid, x, y, w, h, true)) {
