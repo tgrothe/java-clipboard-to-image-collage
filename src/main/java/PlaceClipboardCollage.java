@@ -46,24 +46,8 @@ public class PlaceClipboardCollage {
     return null;
   }
 
-  private static boolean setGrid(boolean[][] grid, int x, int y, int w, int h, boolean val) {
-    for (int i = 0; i < w; i++) {
-      for (int j = 0; j < h; j++) {
-        if (i + x >= grid.length || j + y >= grid.length || grid[i + x][j + y] == val) {
-          return false;
-        }
-      }
-    }
-    for (int i = 0; i < w; i++) {
-      for (int j = 0; j < h; j++) {
-        grid[i + x][j + y] = val;
-      }
-    }
-    return true;
-  }
-
   private static void randomBFSAndSaveImages(ArrayList<Image> images) throws IOException {
-    final int row_len = (int) Math.ceil(Math.sqrt(images.size()));
+    final int row_len = (int) Math.ceil(Math.sqrt(images.size() * 2));
     Integer[] positions = new Integer[row_len * row_len];
     for (int i = 0; i < row_len; i++) {
       for (int j = 0; j < row_len; j++) {
