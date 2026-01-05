@@ -7,66 +7,13 @@ import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Paths;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
-import java.util.Comparator;
-import java.util.function.Function;
+import java.util.Collections;
 import javax.imageio.ImageIO;
 
 public class PlaceClipboardCollage {
-  private record GridImage(Image image, int x, int y, int w, int h) {
-    private int getAbsX() {
-      double w2 = (w - image.getWidth(null) / (double) spacing_d) / 2.0 * spacing_d;
-      return x * spacing_d + (int) w2;
-    }
-
-    private int getAbsY() {
-      double h2 = (h - image.getHeight(null) / (double) spacing_d) / 2.0 * spacing_d;
-      return y * spacing_d + (int) h2;
-    }
-  }
-
-  private static final int spacing_d = 50;
-  private static ArrayList<GridImage> bestGridImages = null;
-
-  @Deprecated
-  private static final Comparator<Image> comparator0 =
-      (o1, o2) -> {
-        int w1 = (int) Math.ceil(o1.getWidth(null) / (double) spacing_d);
-        int w2 = (int) Math.ceil(o2.getWidth(null) / (double) spacing_d);
-        int h1 = (int) Math.ceil(o1.getHeight(null) / (double) spacing_d);
-        int h2 = (int) Math.ceil(o2.getHeight(null) / (double) spacing_d);
-        return w1 * h1 - w2 * h2;
-      };
-
-  private static final Comparator<ArrayList<GridImage>> comparator =
-      (o1, o2) -> {
-        int wmax1 = 0;
-        int hmax1 = 0;
-        int wmax2 = 0;
-        int hmax2 = 0;
-        for (GridImage gridImage : o1) {
-          if (gridImage.x + gridImage.w > wmax1) {
-            wmax1 = gridImage.x + gridImage.w;
-          }
-          if (gridImage.y + gridImage.h > hmax1) {
-            hmax1 = gridImage.y + gridImage.h;
-          }
-        }
-        for (GridImage gridImage : o2) {
-          if (gridImage.x + gridImage.w > wmax2) {
-            wmax2 = gridImage.x + gridImage.w;
-          }
-          if (gridImage.y + gridImage.h > hmax2) {
-            hmax2 = gridImage.y + gridImage.h;
-          }
-        }
-        return Math.max(wmax1, hmax1) - Math.max(wmax2, hmax2);
-      };
-  private static final Function<ArrayList<GridImage>, Integer> getMaxW =
-      (l) -> l.stream().mapToInt(e -> e.x * spacing_d + e.w * spacing_d).max().orElseThrow();
-  private static final Function<ArrayList<GridImage>, Integer> getMaxH =
-      (l) -> l.stream().mapToInt(e -> e.y * spacing_d + e.h * spacing_d).max().orElseThrow();
-  private static long steps = 0;
+  private static final int SPACE_D = 25;
 
   public static void main(String[] args) throws IOException, InterruptedException {
     ArrayList<Image> images = new ArrayList<>();
@@ -79,7 +26,7 @@ public class PlaceClipboardCollage {
         images.add(imageFromClipboard);
         StringSelection stringSelection = new StringSelection("");
         Toolkit.getDefaultToolkit().getSystemClipboard().setContents(stringSelection, null);
-        saveImages(images);
+        randomBFSAndSaveImages(images);
         System.out.println("Ready.");
       }
       Thread.sleep(1000);
@@ -99,80 +46,99 @@ public class PlaceClipboardCollage {
     return null;
   }
 
-  private static boolean setGrid(boolean[][] grid, int x, int y, int w, int h, boolean val) {
-    for (int i = 0; i < w; i++) {
-      for (int j = 0; j < h; j++) {
-        if (i + x >= grid.length || j + y >= grid.length || grid[i + x][j + y] == val) {
-          return false;
+  private static void randomBFSAndSaveImages(ArrayList<Image> images) throws IOException {
+    final int row_len = (int) Math.ceil(Math.sqrt(images.size() * 2));
+    Integer[] positions = new Integer[row_len * row_len];
+    for (int i = 0; i < row_len; i++) {
+      for (int j = 0; j < row_len; j++) {
+        int index = i * row_len + j;
+        if (index < images.size()) {
+          positions[index] = index;
+        } else {
+          positions[index] = null;
         }
       }
     }
-    for (int i = 0; i < w; i++) {
-      for (int j = 0; j < h; j++) {
-        grid[i + x][j + y] = val;
+
+    int bestArea = Integer.MAX_VALUE;
+    ArrayList<Integer> bestPos = null;
+    ArrayDeque<ArrayList<Integer>> queue;
+    {
+      Permutations permutations = new Permutations().permute(positions);
+      ArrayList<ArrayList<Integer>> results = permutations.getAllPermutations();
+      Collections.shuffle(results);
+      queue = new ArrayDeque<>(results);
+    }
+    System.out.println("Total permutations to evaluate: " + queue.size());
+    while (!queue.isEmpty()) {
+      ArrayList<Integer> pos = queue.poll();
+      int area = calculateArea(images, pos, row_len);
+      if (area < bestArea) {
+        bestArea = area;
+        bestPos = pos;
       }
     }
-    return true;
+    if (bestPos == null) {
+      throw new IllegalStateException("No best position found");
+    }
+
+    saveImages(images, bestPos, bestArea, row_len);
   }
 
-  private static void backtrackingAll(
-      ArrayList<Image> images, ArrayList<GridImage> gridImages, boolean[][] grid, int i) {
-    steps++;
-    if (steps >= 10_000_000) {
-      return;
-    }
-    if (i == images.size()) {
-      if (bestGridImages == null || comparator.compare(gridImages, bestGridImages) < 0) {
-        bestGridImages = new ArrayList<>(gridImages);
-      }
-      return;
-    }
-    if (bestGridImages != null && comparator.compare(gridImages, bestGridImages) >= 0) {
-      return;
-    }
-    Image image = images.get(i);
-    int w = (int) Math.ceil(image.getWidth(null) / (double) spacing_d);
-    int h = (int) Math.ceil(image.getHeight(null) / (double) spacing_d);
-    for (int x = 0; x < grid.length; x++) {
-      for (int y = 0; y < grid.length; y++) {
-        if (setGrid(grid, x, y, w, h, true)) {
-          GridImage gi = new GridImage(image, x, y, w, h);
-          gridImages.add(gi);
-          backtrackingAll(images, gridImages, grid, i + 1);
-          gridImages.remove(gridImages.size() - 1);
-          setGrid(grid, x, y, w, h, false);
+  private static int calculateArea(
+      ArrayList<Image> images, ArrayList<Integer> positions, int row_len) {
+    int wmax = SPACE_D;
+    int hmax = SPACE_D;
+    for (int i = 0; i < row_len; i++) {
+      int row_w = SPACE_D;
+      int row_h = SPACE_D;
+      for (int j = 0; j < row_len; j++) {
+        Integer p = positions.get(i * row_len + j);
+        if (p != null) {
+          Image image = images.get(p);
+          int w = image.getWidth(null) + SPACE_D;
+          int h = image.getHeight(null) + SPACE_D;
+          row_w += w;
+          row_h = Math.max(row_h, h);
         }
       }
+      wmax = Math.max(wmax, row_w);
+      hmax += row_h;
     }
+    return Math.max(wmax, hmax);
   }
 
-  private static void saveImages(ArrayList<Image> images) throws IOException {
-    ArrayList<Image> images2 = new ArrayList<>(images);
-    steps = 0;
-    backtrackingAll(images2, new ArrayList<>(), new boolean[100][100], 0);
-
+  private static void saveImages(
+      ArrayList<Image> images, ArrayList<Integer> positions, int bestArea, int row_len)
+      throws IOException {
     // Create a buffered image without transparency
-    BufferedImage bimage =
-        new BufferedImage(
-            getMaxW.apply(bestGridImages),
-            getMaxH.apply(bestGridImages),
-            BufferedImage.TYPE_INT_RGB);
-    Graphics2D g2d = bimage.createGraphics();
+    BufferedImage b_image = new BufferedImage(bestArea, bestArea, BufferedImage.TYPE_INT_RGB);
+    Graphics2D g2d = b_image.createGraphics();
     g2d.setColor(Color.LIGHT_GRAY);
-    g2d.fillRect(0, 0, bimage.getWidth(), bimage.getHeight());
-    for (GridImage gridImage : bestGridImages) {
-      g2d.drawImage(gridImage.image, gridImage.getAbsX(), gridImage.getAbsY(), null);
-    }
-    g2d.dispose();
+    g2d.fillRect(0, 0, b_image.getWidth(), b_image.getHeight());
 
-    images.clear();
-    for (GridImage gridImage : bestGridImages) {
-      images.add(gridImage.image);
+    int hmax = SPACE_D;
+    for (int i = 0; i < row_len; i++) {
+      int row_w = SPACE_D;
+      int row_h = SPACE_D;
+      for (int j = 0; j < row_len; j++) {
+        Integer p = positions.get(i * row_len + j);
+        if (p != null) {
+          Image image = images.get(p);
+          g2d.drawImage(image, row_w, hmax, null);
+          int w = image.getWidth(null) + SPACE_D;
+          int h = image.getHeight(null) + SPACE_D;
+          row_w += w;
+          row_h = Math.max(row_h, h);
+        }
+      }
+      hmax += row_h;
     }
-    bestGridImages = null;
+
+    g2d.dispose();
 
     Files.createDirectories(Paths.get("imgs"));
     ImageIO.write(
-        bimage, "PNG", new File("imgs/test-image-" + System.currentTimeMillis() + ".png"));
+        b_image, "PNG", new File("imgs/test-image-" + System.currentTimeMillis() + ".png"));
   }
 }
