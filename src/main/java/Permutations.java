@@ -4,9 +4,9 @@ import java.util.Iterator;
 import java.util.TreeSet;
 
 public class Permutations implements Iterator<ArrayList<Integer>>, Iterable<ArrayList<Integer>> {
-  private static final int MAX_EXACT_DEPTH = 4;
-  private static final int MAX_PERMUTATIONS = 1_000_000;
-  private static final int MAGIC_NULL_REPRESENTATION = Integer.MAX_VALUE;
+  private static final int MAX_EXACT_DEPTH = 5;
+  private static final int MAX_PERMUTATIONS = 500_000;
+  private static final int MAGIC_NULL_REPRESENTATION = -1;
   private final TreeSet<Integer[]> resultSet = new TreeSet<>(Arrays::compare);
   private final ArrayList<ArrayList<Integer>> resultList = new ArrayList<>();
   private int currentIndex = 0;

@@ -9,7 +9,6 @@ import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
-import java.util.Collections;
 import javax.imageio.ImageIO;
 
 public class PlaceClipboardCollage {
@@ -47,28 +46,19 @@ public class PlaceClipboardCollage {
   }
 
   private static void randomBFSAndSaveImages(ArrayList<Image> images) throws IOException {
-    final int row_len = (int) Math.ceil(Math.sqrt(images.size() * 2));
+    final int row_len = images.size();
     Integer[] positions = new Integer[row_len * row_len];
     for (int i = 0; i < row_len; i++) {
       for (int j = 0; j < row_len; j++) {
         int index = i * row_len + j;
-        if (index < images.size()) {
-          positions[index] = index;
-        } else {
-          positions[index] = null;
-        }
+        positions[index] = index < images.size() ? index : null;
       }
     }
 
     int bestArea = Integer.MAX_VALUE;
     ArrayList<Integer> bestPos = null;
-    ArrayDeque<ArrayList<Integer>> queue;
-    {
-      Permutations permutations = new Permutations().permute(positions);
-      ArrayList<ArrayList<Integer>> results = permutations.getAllPermutations();
-      Collections.shuffle(results);
-      queue = new ArrayDeque<>(results);
-    }
+    ArrayDeque<ArrayList<Integer>> queue =
+        new ArrayDeque<>(new Permutations().permute(positions).getAllPermutations());
     System.out.println("Total permutations to evaluate: " + queue.size());
     while (!queue.isEmpty()) {
       ArrayList<Integer> pos = queue.poll();
@@ -91,7 +81,7 @@ public class PlaceClipboardCollage {
     int hmax = SPACE_D;
     for (int i = 0; i < row_len; i++) {
       int row_w = SPACE_D;
-      int row_h = SPACE_D;
+      int row_h = 0;
       for (int j = 0; j < row_len; j++) {
         Integer p = positions.get(i * row_len + j);
         if (p != null) {
@@ -120,7 +110,7 @@ public class PlaceClipboardCollage {
     int hmax = SPACE_D;
     for (int i = 0; i < row_len; i++) {
       int row_w = SPACE_D;
-      int row_h = SPACE_D;
+      int row_h = 0;
       for (int j = 0; j < row_len; j++) {
         Integer p = positions.get(i * row_len + j);
         if (p != null) {
