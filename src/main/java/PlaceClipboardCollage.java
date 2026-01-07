@@ -14,7 +14,7 @@ import java.util.PriorityQueue;
 import javax.imageio.ImageIO;
 
 public class PlaceClipboardCollage {
-  private record Permutation(Integer[] positions, int index, int lastArea)
+  private record Permutation(Integer[] positions, int index, double compareValue)
       implements Comparable<Permutation> {
     @Override
     public boolean equals(Object o) {
@@ -33,35 +33,28 @@ public class PlaceClipboardCollage {
 
     @Override
     public int compareTo(Permutation o) {
-      // Primary comparison based on lastArea, smaller first
-      int areaComp = Integer.compare(o.lastArea, this.lastArea);
-      if (areaComp != 0) {
-        return areaComp;
-      }
-      // Tie-breaker based on index, smaller first
-      int indexComp = Integer.compare(o.index, this.index);
-      if (indexComp != 0) {
-        return indexComp;
-      }
-      // Final tie-breaker based on positions, nulls first
-      return Arrays.compare(this.positions, o.positions);
+      // Min-heap based on compareValue
+      // The goal is to reduce the total number of permutations to be checked. Therefore, we want to
+      // prioritize those with a larger compareValue (larger area used) in order to check them
+      // earlier and remove them faster.
+      return Double.compare(o.compareValue, this.compareValue);
     }
 
-    private Permutation swapAndCreate(int j, int lastArea) {
+    private Permutation swapAndCreate(int j, double compareValue) {
       Integer[] newPositions = positions.clone();
       Integer temp = newPositions[index];
       newPositions[index] = newPositions[j];
       newPositions[j] = temp;
-      return new Permutation(newPositions, index + 1, lastArea);
+      return new Permutation(newPositions, index + 1, compareValue);
     }
 
-    private Permutation skipAndCreate(int lastArea) {
-      return new Permutation(positions, positions.length - 1, lastArea);
+    private Permutation skipAndCreate(double compareValue) {
+      return new Permutation(positions, positions.length, compareValue);
     }
   }
 
   private static final int SPACE_D = 25;
-  private static final int SOFT_MAX_POLLS_LIMIT = 1_000_000;
+  private static final int POLLS_SOFT_LIMIT = 500_000;
 
   public static void main(String[] args) throws IOException, InterruptedException {
     ArrayList<Image> images = new ArrayList<>();
@@ -104,43 +97,41 @@ public class PlaceClipboardCollage {
       }
     }
 
-    int bestArea = Integer.MAX_VALUE;
+    int bestArea = calculateArea(images, positions, row_len, positions.length) + 1;
     Integer[] bestPos = null;
 
     PriorityQueue<Permutation> queue = new PriorityQueue<>();
     HashSet<Permutation> visited = new HashSet<>();
-    queue.add(new Permutation(positions, 0, calculateArea(images, positions, row_len, 0)));
+    queue.add(new Permutation(positions, 1, 1));
     int polls = 0;
+    int lastBestAreaPoll = 0;
     while (!queue.isEmpty()) {
+      if (polls - lastBestAreaPoll >= POLLS_SOFT_LIMIT && bestPos != null) {
+        // Stop if no better area found in a while
+        break;
+      }
       Permutation permutation = queue.poll();
       polls++;
       if (visited.contains(permutation)) {
         continue;
       }
       visited.add(permutation);
-      int area = calculateArea(images, permutation.positions(), row_len, permutation.index() + 1);
+      int area = calculateArea(images, permutation.positions(), row_len, permutation.index());
       if (area >= bestArea) {
         continue;
       }
-      if (permutation.index() + 1 == permutation.positions().length) {
+      if (permutation.index() == permutation.positions().length) {
         System.out.println("Found smaller area: " + area + " (polls: " + polls + ")");
         bestArea = area;
         bestPos = permutation.positions();
+        lastBestAreaPoll = polls;
         continue;
       }
-      if (polls >= SOFT_MAX_POLLS_LIMIT) {
-        Permutation skipped = permutation.skipAndCreate(area);
-        if (!visited.contains(skipped)) {
-          queue.add(skipped);
-        }
-        continue;
-      }
-      for (int i = permutation.index() + 1; i < permutation.positions().length; i++) {
+      for (int i = permutation.index(); i < permutation.positions().length; i++) {
         Permutation swapped = permutation.swapAndCreate(i, area);
-        if (visited.contains(swapped)) {
-          continue;
+        if (!visited.contains(swapped)) {
+          queue.add(swapped);
         }
-        queue.add(swapped);
       }
     }
     System.out.println("Total permutations checked: " + polls);
@@ -162,6 +153,32 @@ public class PlaceClipboardCollage {
       for (int j = 0; j < row_len; j++) {
         if (i * row_len + j >= stopAt) {
           break a;
+        }
+        Integer p = positions[i * row_len + j];
+        if (p != null) {
+          Image image = images.get(p);
+          int w = image.getWidth(null) + SPACE_D;
+          int h = image.getHeight(null) + SPACE_D;
+          row_w += w;
+          row_h = Math.max(row_h, h);
+        }
+      }
+      wmax = Math.max(wmax, row_w);
+      hmax += row_h;
+    }
+    return Math.max(wmax, hmax);
+  }
+
+  private static int calculateRemainingArea(
+      ArrayList<Image> images, Integer[] positions, int row_len, int startAt) {
+    int wmax = 0;
+    int hmax = 0;
+    for (int i = 0; i < row_len; i++) {
+      int row_w = 0;
+      int row_h = 0;
+      for (int j = 0; j < row_len; j++) {
+        if (i * row_len + j < startAt) {
+          continue;
         }
         Integer p = positions[i * row_len + j];
         if (p != null) {
