@@ -8,54 +8,10 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.HashSet;
-import java.util.PriorityQueue;
-import java.util.Random;
 import javax.imageio.ImageIO;
 
 public class PlaceClipboardCollage {
-  private record Permutation(Integer[] positions, int index, int area)
-      implements Comparable<Permutation> {
-    private static final Random RANDOM = new Random(12345);
-
-    @Override
-    public boolean equals(Object o) {
-      if (!(o instanceof Permutation that)) {
-        return false;
-      }
-      return index == that.index && Arrays.equals(positions, that.positions);
-    }
-
-    @Override
-    public int hashCode() {
-      int result = Arrays.hashCode(positions);
-      result = 31 * result + index;
-      return result;
-    }
-
-    @Override
-    public int compareTo(Permutation o) {
-      return Integer.compare(o.area, area);
-    }
-
-    private Permutation createNewRandomizedPermutation(ArrayList<Image> images, int row_len) {
-      int newIndex = index + 1;
-      Integer[] newPositions = positions.clone();
-      for (int i = newIndex; i < newPositions.length - 1; i++) {
-        int swapIndex = RANDOM.nextInt(i, newPositions.length);
-        Integer temp = newPositions[i];
-        newPositions[i] = newPositions[swapIndex];
-        newPositions[swapIndex] = temp;
-      }
-      return new Permutation(
-          newPositions, newIndex, calculateArea(images, newPositions, row_len, newIndex));
-    }
-  }
-
   private static final int SPACE_D = 25;
-  private static final int MAX_POLLS = 1_000_000;
-  private static final int MAX_QUEUE_SIZE = 1000;
 
   public static void main(String[] args) throws IOException, InterruptedException {
     ArrayList<Image> images = new ArrayList<>();
@@ -67,8 +23,14 @@ public class PlaceClipboardCollage {
         System.out.println("Found image.");
         images.add(imageFromClipboard);
         StringSelection stringSelection = new StringSelection("");
-        Toolkit.getDefaultToolkit().getSystemClipboard().setContents(stringSelection, null);
-        randomBFSAndSaveImages(images);
+        try {
+          Toolkit.getDefaultToolkit().getSystemClipboard().setContents(stringSelection, null);
+        } catch (IllegalStateException e) {
+          System.out.println("Could not clear clipboard: " + e.getMessage());
+          Thread.sleep(1000);
+          continue;
+        }
+        sortAndSaveImages(images);
         System.out.println("Ready.");
       }
       Thread.sleep(1000);
@@ -88,136 +50,141 @@ public class PlaceClipboardCollage {
     return null;
   }
 
-  private static void randomBFSAndSaveImages(ArrayList<Image> images) throws IOException {
+  private static int getRowWidth(ArrayList<Image> row) {
+    int rowWidth = SPACE_D;
+    for (Image img : row) {
+      rowWidth += img.getWidth(null) + SPACE_D;
+    }
+    return rowWidth;
+  }
+
+  private static int getRowHeight(ArrayList<Image> row) {
+    int rowHeight = 0;
+    for (Image img : row) {
+      rowHeight = Math.max(rowHeight, img.getHeight(null) + SPACE_D);
+    }
+    return rowHeight;
+  }
+
+  private static int calculateArea(ArrayList<ArrayList<Image>> imgTable) {
+    int w_max = 0;
+    int h_max = SPACE_D;
+    for (ArrayList<Image> row : imgTable) {
+      if (row.isEmpty()) {
+        continue;
+      }
+      int row_w = getRowWidth(row);
+      int row_h = getRowHeight(row);
+      w_max = Math.max(w_max, row_w);
+      h_max += row_h;
+    }
+    return Math.max(w_max, h_max);
+  }
+
+  private static void sortAndSaveImages(ArrayList<Image> images) throws IOException {
+    ArrayList<Image> sortedImages = new ArrayList<>(images);
+    // Sort images by height ascending
+    sortedImages.sort(
+        (img1, img2) -> {
+          int h1 = img1.getHeight(null);
+          int h2 = img2.getHeight(null);
+          return Integer.compare(h1, h2);
+        });
+
+    ArrayList<ArrayList<Image>> imgTable = new ArrayList<>();
     final int row_len = images.size();
-    Integer[] positions = new Integer[row_len * row_len];
     for (int i = 0; i < row_len; i++) {
-      for (int j = 0; j < row_len; j++) {
-        int index = i * row_len + j;
-        positions[index] = index < images.size() ? index : null;
-      }
+      imgTable.add(new ArrayList<>());
+    }
+    for (Image sortedImage : sortedImages) {
+      imgTable.get(0).add(sortedImage);
     }
 
-    int bestArea = Integer.MAX_VALUE;
-    Integer[] bestPos = null;
-
-    PriorityQueue<Permutation> queue = new PriorityQueue<>();
-    HashSet<Permutation> visited = new HashSet<>();
-    queue.add(
-        new Permutation(positions, 0, calculateArea(images, positions, row_len, positions.length)));
-    int polls = 0;
-    int skips = 0;
-    while (!queue.isEmpty()) {
-      Permutation permutation = queue.poll();
-      polls++;
-      if (visited.contains(permutation)) {
-        skips++;
-        continue;
-      }
-      visited.add(permutation);
-      int area = permutation.area();
-      if (area >= bestArea) {
-        skips++;
-        continue;
-      }
-      if (permutation.index() == permutation.positions().length) {
-        System.out.println("Found smaller area: " + area + " (polls: " + polls + ")");
-        bestArea = area;
-        bestPos = permutation.positions();
-        continue;
-      }
-      if (polls >= MAX_POLLS) {
-        continue;
-      }
-      int n = MAX_QUEUE_SIZE - queue.size();
-      for (int i = 0; i < n; i++) {
-        Permutation newPermutation = permutation.createNewRandomizedPermutation(images, row_len);
-        if (visited.contains(newPermutation) || newPermutation.area() >= bestArea) {
-          skips++;
-          continue;
-        }
-        queue.add(newPermutation);
-      }
-    }
-    System.out.println("Total permutations checked: " + polls);
-    System.out.println("Total permutations skipped: " + skips);
-    if (bestPos == null) {
-      throw new IllegalStateException("No best position found");
-    }
-
+    ArrayList<ArrayList<Image>> bestTable = backtrack(imgTable, 0, 0);
     // Sort each row to have a consistent output
-    int[][] sortedRows = new int[row_len][row_len];
-    for (int i = 0; i < row_len; i++) {
-      for (int k = 0; k < row_len; k++) {
-        sortedRows[i][k] =
-            bestPos[i * row_len + k] == null ? Integer.MAX_VALUE : bestPos[i * row_len + k];
-      }
-      Arrays.sort(sortedRows[i]);
-    }
-    for (int i = 0; i < row_len; i++) {
-      for (int k = 0; k < row_len; k++) {
-        bestPos[i * row_len + k] = sortedRows[i][k] == Integer.MAX_VALUE ? null : sortedRows[i][k];
-      }
+    for (ArrayList<Image> row : bestTable) {
+      row.sort(
+          (img1, img2) -> {
+            int i1 = images.indexOf(img1);
+            int i2 = images.indexOf(img2);
+            return Integer.compare(i1, i2);
+          });
     }
 
-    saveImages(images, bestPos, bestArea, row_len);
+    Integer[] bestPositions = new Integer[row_len * row_len];
+    for (int i = 0; i < bestTable.size(); i++) {
+      ArrayList<Image> row = bestTable.get(i);
+      for (int j = 0; j < row.size(); j++) {
+        Image img = row.get(j);
+        int index = images.indexOf(img);
+        bestPositions[i * row_len + j] = index;
+      }
+    }
+    int bestArea = calculateArea(bestTable);
+
+    saveImages(images, bestPositions, bestArea, row_len);
   }
 
-  private static int calculateArea(
-      ArrayList<Image> images, Integer[] positions, int row_len, int stopAt) {
-    int wmax = SPACE_D;
-    int hmax = SPACE_D;
-    a:
-    for (int i = 0; i < row_len; i++) {
-      int row_w = SPACE_D;
-      int row_h = 0;
-      for (int j = 0; j < row_len; j++) {
-        if (i * row_len + j >= stopAt) {
-          break a;
-        }
-        Integer p = positions[i * row_len + j];
-        if (p != null) {
-          Image image = images.get(p);
-          int w = image.getWidth(null) + SPACE_D;
-          int h = image.getHeight(null) + SPACE_D;
-          row_w += w;
-          row_h = Math.max(row_h, h);
-        }
-      }
-      wmax = Math.max(wmax, row_w);
-      hmax += row_h;
+  private static ArrayList<ArrayList<Image>> shallowCopy(ArrayList<ArrayList<Image>> imgTable) {
+    ArrayList<ArrayList<Image>> newTable = new ArrayList<>();
+    for (ArrayList<Image> row : imgTable) {
+      newTable.add(new ArrayList<>(row));
     }
-    return Math.max(wmax, hmax);
+    return newTable;
   }
 
-  private static int calculateRemainingArea(
-      ArrayList<Image> images, Integer[] positions, int row_len, int startAt) {
-    int wmax = 0;
-    int hmax = 0;
-    for (int i = 0; i < row_len; i++) {
-      int row_w = 0;
-      int row_h = 0;
-      for (int j = 0; j < row_len; j++) {
-        if (i * row_len + j < startAt) {
-          continue;
-        }
-        Integer p = positions[i * row_len + j];
-        if (p != null) {
-          Image image = images.get(p);
-          int w = image.getWidth(null) + SPACE_D;
-          int h = image.getHeight(null) + SPACE_D;
-          row_w += w;
-          row_h = Math.max(row_h, h);
-        }
-      }
-      wmax = Math.max(wmax, row_w);
-      hmax += row_h;
+  private static int max_depth = 0;
+
+  private static ArrayList<ArrayList<Image>> backtrack(
+      ArrayList<ArrayList<Image>> imgTable, int index, int depth) {
+    if (depth > max_depth) {
+      max_depth = depth;
+      System.out.println("New max depth: " + max_depth);
     }
-    return Math.max(wmax, hmax);
+    // Limit depth to avoid excessive recursion
+    if (depth >= 128) {
+      return imgTable;
+    }
+    if (index + 1 >= imgTable.size()) {
+      return imgTable;
+    }
+    if (imgTable.get(index).isEmpty()) {
+      return imgTable;
+    }
+
+    // Calculate current area
+    int bestArea = calculateArea(imgTable);
+    ArrayList<ArrayList<Image>> bestTable = imgTable;
+
+    // Try moving last image from row index to row index + 1 (e.g., balancing rows)
+    ArrayList<ArrayList<Image>> copy = shallowCopy(imgTable);
+    ArrayList<Image> r1 = copy.get(index);
+    ArrayList<Image> r2 = copy.get(index + 1);
+    r2.add(0, r1.remove(r1.size() - 1));
+
+    ArrayList<ArrayList<Image>> bt = backtrack(copy, index + 1, depth + 1);
+    int area = calculateArea(bt);
+    if (area >= bestArea) {
+      // No improvement, return best found so far
+      return bestTable;
+    }
+    bestArea = area;
+    bestTable = bt;
+
+    // Can we do better by moving more images from row index to row index + 1?
+    bt = backtrack(copy, index, depth + 1);
+    area = calculateArea(bt);
+    if (area < bestArea) {
+      // Found a better arrangement
+      bestTable = bt;
+    }
+
+    return bestTable;
   }
 
   private static void saveImages(
       ArrayList<Image> images, Integer[] positions, int bestArea, int row_len) throws IOException {
+    System.out.println("Saving image with area: " + bestArea + "x" + bestArea + " pixels.");
     // Create a buffered image without transparency
     BufferedImage b_image = new BufferedImage(bestArea, bestArea, BufferedImage.TYPE_INT_RGB);
     Graphics2D g2d = b_image.createGraphics();
